@@ -6,7 +6,7 @@ export const ARENA_LEFT = 20;
 export const ARENA_RIGHT = 780;
 
 // === Player Dimensions ===
-export const PLAYER_WIDTH = 48;
+export const PLAYER_WIDTH = 28;
 export const PLAYER_STAND_HEIGHT = 64;
 export const PLAYER_CROUCH_HEIGHT = 40;
 
@@ -35,7 +35,7 @@ export const WEAPON_DEFS = {
     id: 'sword',
     name: 'Sword',
     type: 'melee',
-    range: 60,
+    range: 35,
     attackFrames: 24,
     activeStart: 7,
     activeEnd: 13,
@@ -46,7 +46,7 @@ export const WEAPON_DEFS = {
     id: 'dagger',
     name: 'Dagger',
     type: 'melee',
-    range: 35,
+    range: 20,
     attackFrames: 14,
     activeStart: 4,
     activeEnd: 8,
@@ -57,7 +57,7 @@ export const WEAPON_DEFS = {
     id: 'spear',
     name: 'Spear',
     type: 'melee',
-    range: 90,
+    range: 50,
     attackFrames: 36,
     activeStart: 12,
     activeEnd: 20,

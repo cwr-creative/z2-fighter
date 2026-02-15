@@ -250,23 +250,18 @@ function drawArms(ctx, body, p, atk, lineColor) {
   const shoulderX = body.cx;
   const shoulderY = body.shoulderY;
 
-  // Determine weapon-side and shield-side
-  // Weapon arm is on the facing side, shield arm is on the back side
-  const weaponSide = facing;
-  const shieldSide = -facing;
-
-  // ── Shield arm (back arm — drawn first so it's behind body) ──
-  drawShieldArm(ctx, body, p, shoulderX, shoulderY, shieldSide, lineColor);
-
-  // ── Weapon arm ──
-  drawWeaponArm(ctx, body, p, atk, shoulderX, shoulderY, weaponSide, lineColor);
+  // Both arms point forward (facing direction)
+  // Shield arm drawn first (behind), weapon arm drawn second (in front)
+  drawShieldArm(ctx, body, p, shoulderX, shoulderY, facing, lineColor);
+  drawWeaponArm(ctx, body, p, atk, shoulderX, shoulderY, facing, lineColor);
 }
 
 function drawShieldArm(ctx, body, p, sx, sy, side, lineColor) {
-  const elbowX = sx + side * 10;
-  const elbowY = sy + 8;
-  const handX = sx + side * 14;
-  const handY = sy + 4;
+  // Shield arm extends forward, slightly shorter reach than weapon arm
+  const elbowX = sx + side * 6;
+  const elbowY = sy + 6;
+  const handX = sx + side * 10;
+  const handY = sy + 2;
 
   // Arm
   ctx.strokeStyle = lineColor;
@@ -277,9 +272,9 @@ function drawShieldArm(ctx, body, p, sx, sy, side, lineColor) {
   ctx.lineTo(handX, handY);
   ctx.stroke();
 
-  // Shield — small rectangle on the arm
+  // Shield — tall rectangle on the arm, facing forward
   const shieldW = 4;
-  const shieldH = body.crouch ? 12 : 16;
+  const shieldH = body.crouch ? 24 : 32;
   const shieldColor = p.state === 'blockstun' ? COLORS.shieldBlock : COLORS.shield;
   ctx.fillStyle = shieldColor;
   ctx.strokeStyle = '#AA8800';
@@ -294,11 +289,11 @@ function drawWeaponArm(ctx, _body, p, atk, sx, sy, side, lineColor) {
   let elbowX, elbowY, handX, handY, weaponAngle;
 
   if (!atk) {
-    // Idle — arm hangs slightly forward, hand at hip level
-    elbowX = sx + side * 8;
-    elbowY = sy + 12;
-    handX = sx + side * 12;
-    handY = sy + 18;
+    // Idle — arm forward, hand near torso level
+    elbowX = sx + side * 6;
+    elbowY = sy + 8;
+    handX = sx + side * 8;
+    handY = sy + 14;
     weaponAngle = facing * 0.3; // slight forward angle
   } else if (atk.phase === 'windup') {
     // Windup — arm pulls BACK behind the body, weapon cocked
@@ -367,11 +362,11 @@ function drawWeaponInHand(ctx, p, atk, hx, hy, angle, facing) {
   ctx.rotate(angle);
 
   if (wDef.id === 'sword') {
-    drawSwordWeapon(ctx, facing);
+    drawSwordWeapon(ctx, facing, wDef);
   } else if (wDef.id === 'dagger') {
-    drawDaggerWeapon(ctx, facing);
+    drawDaggerWeapon(ctx, facing, wDef);
   } else if (wDef.id === 'spear') {
-    drawSpearWeapon(ctx, facing);
+    drawSpearWeapon(ctx, facing, wDef);
   } else if (wDef.subtype === 'boomerang') {
     drawBoomerangWeapon(ctx, facing);
   } else if (wDef.subtype === 'knife') {
@@ -381,22 +376,24 @@ function drawWeaponInHand(ctx, p, atk, hx, hy, angle, facing) {
   ctx.restore();
 }
 
-function drawSwordWeapon(ctx, facing) {
+function drawSwordWeapon(ctx, facing, wDef) {
   const dir = facing;
+  const bladeLen = wDef.range;
+
   // Blade
   ctx.strokeStyle = COLORS.weaponSteel;
   ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(dir * 20, -2);
+  ctx.lineTo(dir * bladeLen, -1);
   ctx.stroke();
 
   // Crossguard
   ctx.strokeStyle = COLORS.weaponHandle;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(dir * 2, -4);
-  ctx.lineTo(dir * 2, 4);
+  ctx.moveTo(dir * 1, -4);
+  ctx.lineTo(dir * 1, 4);
   ctx.stroke();
 
   // Handle nub
@@ -404,14 +401,16 @@ function drawSwordWeapon(ctx, facing) {
   ctx.fillRect(-dir * 2 - 1, -1.5, 3, 3);
 }
 
-function drawDaggerWeapon(ctx, facing) {
+function drawDaggerWeapon(ctx, facing, wDef) {
   const dir = facing;
+  const bladeLen = wDef.range;
+
   // Short blade
   ctx.strokeStyle = COLORS.weaponSteel;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(dir * 10, -1);
+  ctx.lineTo(dir * bladeLen, -1);
   ctx.stroke();
 
   // Small guard
@@ -423,25 +422,28 @@ function drawDaggerWeapon(ctx, facing) {
   ctx.stroke();
 }
 
-function drawSpearWeapon(ctx, facing) {
+function drawSpearWeapon(ctx, facing, wDef) {
   const dir = facing;
+  const shaftLen = wDef.range;
+  const headLen = 6;
+
   // Long shaft
   ctx.strokeStyle = COLORS.weaponSpear;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(-dir * 4, 0);
-  ctx.lineTo(dir * 26, 0);
+  ctx.moveTo(-dir * 3, 0);
+  ctx.lineTo(dir * shaftLen, 0);
   ctx.stroke();
 
   // Spearhead (triangle)
   ctx.fillStyle = COLORS.weaponSteel;
   ctx.beginPath();
-  ctx.moveTo(dir * 26, 0);
-  ctx.lineTo(dir * 32, 0);
-  ctx.lineTo(dir * 26, -3);
-  ctx.moveTo(dir * 26, 0);
-  ctx.lineTo(dir * 32, 0);
-  ctx.lineTo(dir * 26, 3);
+  ctx.moveTo(dir * shaftLen, 0);
+  ctx.lineTo(dir * (shaftLen + headLen), 0);
+  ctx.lineTo(dir * shaftLen, -3);
+  ctx.moveTo(dir * shaftLen, 0);
+  ctx.lineTo(dir * (shaftLen + headLen), 0);
+  ctx.lineTo(dir * shaftLen, 3);
   ctx.fill();
 }
 
