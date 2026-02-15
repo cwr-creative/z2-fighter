@@ -1,5 +1,5 @@
 /**
- * Canvas 2D renderer — draws game state with placeholder graphics.
+ * Canvas 2D renderer — draws game state with procedural stick figures.
  * Rendering is fully separated from simulation.
  */
 import * as C from './constants.js';
@@ -10,8 +10,10 @@ const COLORS = {
   groundDark: '#4A7532',
   p1: '#3366CC',
   p1Light: '#6699FF',
+  p1Skin: '#FFCC99',
   p2: '#CC3333',
   p2Light: '#FF6666',
+  p2Skin: '#FFCC99',
   shield: '#FFD700',
   shieldBlock: '#FFFFFF',
   hitstun: '#FFFFFF',
@@ -22,6 +24,9 @@ const COLORS = {
   boomerang: '#DD8800',
   boomerangArc: 'rgba(221,136,0,0.15)',
   attackSlash: '#FFFFAA',
+  weaponSteel: '#C0C0C0',
+  weaponHandle: '#8B4513',
+  weaponSpear: '#D2B48C',
 };
 
 export function render(ctx, state) {
@@ -36,15 +41,12 @@ export function render(ctx, state) {
 // ─── Arena ───────────────────────────────────────────────────
 
 function drawArena(ctx) {
-  // Sky
   ctx.fillStyle = COLORS.sky;
   ctx.fillRect(0, 0, C.CANVAS_WIDTH, C.GROUND_Y);
 
-  // Ground
   ctx.fillStyle = COLORS.ground;
   ctx.fillRect(0, C.GROUND_Y, C.CANVAS_WIDTH, C.CANVAS_HEIGHT - C.GROUND_Y);
 
-  // Ground line
   ctx.strokeStyle = COLORS.groundDark;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -52,7 +54,6 @@ function drawArena(ctx) {
   ctx.lineTo(C.CANVAS_WIDTH, C.GROUND_Y);
   ctx.stroke();
 
-  // Arena bounds
   ctx.strokeStyle = 'rgba(0,0,0,0.2)';
   ctx.setLineDash([4, 4]);
   ctx.beginPath();
@@ -64,6 +65,64 @@ function drawArena(ctx) {
   ctx.setLineDash([]);
 }
 
+// ─── Stick Figure Body Layout ────────────────────────────────
+
+function getBodyLayout(p) {
+  const cx = p.x + C.PLAYER_WIDTH / 2;
+  const footY = C.GROUND_Y;
+  const crouch = p.stance === 'crouching';
+
+  if (!crouch) {
+    // Standing proportions within 48×64
+    const headR = 7;
+    const headY = footY - 58;
+    const neckY = headY + headR + 1;
+    const shoulderY = neckY + 4;
+    const hipY = footY - 22;
+    const kneeY = footY - 10;
+    return { cx, footY, headY, headR, neckY, shoulderY, hipY, kneeY, crouch };
+  } else {
+    // Crouching — compressed, knees bent
+    const headR = 6;
+    const headY = footY - 36;
+    const neckY = headY + headR + 1;
+    const shoulderY = neckY + 3;
+    const hipY = footY - 14;
+    const kneeY = footY - 6;
+    return { cx, footY, headY, headR, neckY, shoulderY, hipY, kneeY, crouch };
+  }
+}
+
+// ─── Attack Phase Helpers ────────────────────────────────────
+
+/** Returns {phase, t} where phase is 'windup'|'active'|'recovery' and t is 0..1 progress within that phase */
+function getAttackPhase(p) {
+  if (p.state !== 'attacking' || !p.activeWeapon) return null;
+  const wDef = C.WEAPON_DEFS[p.activeWeapon];
+  if (!wDef) return null;
+
+  const elapsed = wDef.attackFrames - p.stateTimer;
+
+  if (wDef.type === 'melee') {
+    if (elapsed < wDef.activeStart) {
+      return { phase: 'windup', t: elapsed / wDef.activeStart, wDef };
+    } else if (elapsed <= wDef.activeEnd) {
+      return { phase: 'active', t: (elapsed - wDef.activeStart) / (wDef.activeEnd - wDef.activeStart + 1), wDef };
+    } else {
+      return { phase: 'recovery', t: (elapsed - wDef.activeEnd) / (wDef.attackFrames - wDef.activeEnd), wDef };
+    }
+  } else {
+    // Projectile weapons: windup before spawn, recovery after
+    if (elapsed < wDef.projectileSpawnFrame) {
+      return { phase: 'windup', t: elapsed / wDef.projectileSpawnFrame, wDef };
+    } else if (elapsed === wDef.projectileSpawnFrame) {
+      return { phase: 'active', t: 0.5, wDef };
+    } else {
+      return { phase: 'recovery', t: (elapsed - wDef.projectileSpawnFrame) / (wDef.attackFrames - wDef.projectileSpawnFrame), wDef };
+    }
+  }
+}
+
 // ─── Players ─────────────────────────────────────────────────
 
 function drawPlayers(ctx, state) {
@@ -73,87 +132,359 @@ function drawPlayers(ctx, state) {
 }
 
 function drawPlayer(ctx, p, idx, state) {
-  const isCrouching = p.stance === 'crouching';
-  const h = isCrouching ? C.PLAYER_CROUCH_HEIGHT : C.PLAYER_STAND_HEIGHT;
-  const y = C.GROUND_Y - h;
+  const body = getBodyLayout(p);
   const baseColor = idx === 0 ? COLORS.p1 : COLORS.p2;
   const lightColor = idx === 0 ? COLORS.p1Light : COLORS.p2Light;
 
-  // Body flash during hitstun/blockstun
-  let bodyColor = baseColor;
+  // Flash during hitstun/blockstun
+  let tint = null;
   if (p.state === 'hitstun' && p.stateTimer % 4 < 2) {
-    bodyColor = COLORS.hitstun;
+    tint = COLORS.hitstun;
   } else if (p.state === 'blockstun' && p.stateTimer % 4 < 2) {
-    bodyColor = COLORS.blockstun;
+    tint = COLORS.blockstun;
   }
 
-  // Body
-  ctx.fillStyle = bodyColor;
-  ctx.fillRect(p.x, y, C.PLAYER_WIDTH, h);
+  const lineColor = tint || baseColor;
+  const skinColor = tint || COLORS.p1Skin;
 
-  // Outline
-  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(p.x, y, C.PLAYER_WIDTH, h);
+  const atk = getAttackPhase(p);
+  const facing = p.facing;
 
-  // Face indicator (small triangle on the front side)
-  const faceX = p.facing === 1 ? p.x + C.PLAYER_WIDTH : p.x;
-  const faceDir = p.facing;
-  ctx.fillStyle = lightColor;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // ── Legs ──
+  drawLegs(ctx, body, facing, lineColor);
+
+  // ── Torso ──
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(faceX, y + 8);
-  ctx.lineTo(faceX + faceDir * 8, y + 14);
-  ctx.lineTo(faceX, y + 20);
-  ctx.closePath();
+  ctx.moveTo(body.cx, body.neckY);
+  ctx.lineTo(body.cx, body.hipY);
+  ctx.stroke();
+
+  // ── Arms ──
+  drawArms(ctx, body, p, atk, lineColor);
+
+  // ── Head ──
+  ctx.fillStyle = skinColor;
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(body.cx, body.headY, body.headR, 0, Math.PI * 2);
   ctx.fill();
+  ctx.stroke();
 
-  // Eyes (two dots)
-  ctx.fillStyle = '#FFF';
-  const eyeBaseX = p.facing === 1 ? p.x + C.PLAYER_WIDTH - 14 : p.x + 6;
-  ctx.fillRect(eyeBaseX, y + 10, 3, 3);
-  ctx.fillRect(eyeBaseX + 6, y + 10, 3, 3);
+  // Eyes — two dots facing the right direction
+  const eyeOffX = facing * 3;
+  const eyeSpread = 2;
+  ctx.fillStyle = tint ? lineColor : '#000';
+  ctx.fillRect(body.cx + eyeOffX - eyeSpread - 1, body.headY - 2, 2, 2);
+  ctx.fillRect(body.cx + eyeOffX + eyeSpread, body.headY - 2, 2, 2);
 
-  // Shield bar (on the facing side, at appropriate height)
-  const shieldX = p.facing === 1 ? p.x + C.PLAYER_WIDTH - 4 : p.x;
-  const shieldW = 4;
-  let shieldY, shieldH;
-  if (p.stance === 'standing') {
-    // High shield — top half
-    shieldY = y;
-    shieldH = h / 2;
-  } else {
-    // Low shield — bottom half
-    shieldY = y + h / 2;
-    shieldH = h / 2;
-  }
-  ctx.fillStyle = p.state === 'blockstun' ? COLORS.shieldBlock : COLORS.shield;
-  ctx.fillRect(shieldX, shieldY, shieldW, shieldH);
-
-  // Melee attack visual
-  if (p.state === 'attacking' && p.activeWeapon) {
-    const wDef = C.WEAPON_DEFS[p.activeWeapon];
-    if (wDef && wDef.type === 'melee') {
-      const elapsed = wDef.attackFrames - p.stateTimer;
-      if (elapsed >= wDef.activeStart && elapsed <= wDef.activeEnd) {
-        drawMeleeSlash(ctx, p, wDef, y, h);
-      }
-    }
+  // ── Attack slash effect (active frames only) ──
+  if (atk && atk.phase === 'active' && atk.wDef.type === 'melee') {
+    drawMeleeSlashEffect(ctx, p, atk, body);
   }
 
   // Player label
-  ctx.fillStyle = '#FFF';
+  ctx.fillStyle = lightColor;
   ctx.font = 'bold 10px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`P${idx + 1}`, p.x + C.PLAYER_WIDTH / 2, y - 4);
+  ctx.fillText(`P${idx + 1}`, body.cx, body.headY - body.headR - 6);
 }
 
-function drawMeleeSlash(ctx, p, wDef, bodyY, bodyH) {
-  const startX = p.x + (p.facing === 1 ? C.PLAYER_WIDTH : 0);
-  const endX = startX + p.facing * wDef.range;
+// ─── Legs ────────────────────────────────────────────────────
 
-  // Attack height indicator
+function drawLegs(ctx, body, _facing, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+
+  const legSpread = body.crouch ? 10 : 7;
+  const hipX = body.cx;
+
+  if (body.crouch) {
+    // Crouching: knees bent outward
+    ctx.beginPath();
+    ctx.moveTo(hipX, body.hipY);
+    ctx.lineTo(hipX - legSpread, body.kneeY);
+    ctx.lineTo(hipX - legSpread - 3, body.footY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(hipX, body.hipY);
+    ctx.lineTo(hipX + legSpread, body.kneeY);
+    ctx.lineTo(hipX + legSpread + 3, body.footY);
+    ctx.stroke();
+  } else {
+    // Standing: slight spread, small feet
+    ctx.beginPath();
+    ctx.moveTo(hipX, body.hipY);
+    ctx.lineTo(hipX - legSpread, body.footY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(hipX, body.hipY);
+    ctx.lineTo(hipX + legSpread, body.footY);
+    ctx.stroke();
+  }
+
+  // Feet — small horizontal lines
+  ctx.lineWidth = 2;
+  const footLen = 4;
+  ctx.beginPath();
+  const lFootX = body.crouch ? hipX - legSpread - 3 : hipX - legSpread;
+  const rFootX = body.crouch ? hipX + legSpread + 3 : hipX + legSpread;
+  ctx.moveTo(lFootX - footLen * 0.3, body.footY);
+  ctx.lineTo(lFootX + footLen, body.footY);
+  ctx.moveTo(rFootX - footLen, body.footY);
+  ctx.lineTo(rFootX + footLen * 0.3, body.footY);
+  ctx.stroke();
+}
+
+// ─── Arms ────────────────────────────────────────────────────
+
+function drawArms(ctx, body, p, atk, lineColor) {
+  const facing = p.facing;
+  const shoulderX = body.cx;
+  const shoulderY = body.shoulderY;
+
+  // Determine weapon-side and shield-side
+  // Weapon arm is on the facing side, shield arm is on the back side
+  const weaponSide = facing;
+  const shieldSide = -facing;
+
+  // ── Shield arm (back arm — drawn first so it's behind body) ──
+  drawShieldArm(ctx, body, p, shoulderX, shoulderY, shieldSide, lineColor);
+
+  // ── Weapon arm ──
+  drawWeaponArm(ctx, body, p, atk, shoulderX, shoulderY, weaponSide, lineColor);
+}
+
+function drawShieldArm(ctx, body, p, sx, sy, side, lineColor) {
+  const elbowX = sx + side * 10;
+  const elbowY = sy + 8;
+  const handX = sx + side * 14;
+  const handY = sy + 4;
+
+  // Arm
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(elbowX, elbowY);
+  ctx.lineTo(handX, handY);
+  ctx.stroke();
+
+  // Shield — small rectangle on the arm
+  const shieldW = 4;
+  const shieldH = body.crouch ? 12 : 16;
+  const shieldColor = p.state === 'blockstun' ? COLORS.shieldBlock : COLORS.shield;
+  ctx.fillStyle = shieldColor;
+  ctx.strokeStyle = '#AA8800';
+  ctx.lineWidth = 1;
+  ctx.fillRect(handX - shieldW / 2, handY - shieldH / 2, shieldW, shieldH);
+  ctx.strokeRect(handX - shieldW / 2, handY - shieldH / 2, shieldW, shieldH);
+}
+
+function drawWeaponArm(ctx, _body, p, atk, sx, sy, side, lineColor) {
+  const facing = p.facing;
+  // Determine arm pose based on attack phase
+  let elbowX, elbowY, handX, handY, weaponAngle;
+
+  if (!atk) {
+    // Idle — arm hangs slightly forward, hand at hip level
+    elbowX = sx + side * 8;
+    elbowY = sy + 12;
+    handX = sx + side * 12;
+    handY = sy + 18;
+    weaponAngle = facing * 0.3; // slight forward angle
+  } else if (atk.phase === 'windup') {
+    // Windup — arm pulls BACK behind the body, weapon cocked
+    const t = atk.t;
+    // Elbow goes behind and up
+    elbowX = sx - side * (4 + 10 * t);
+    elbowY = sy + 4 - 6 * t;
+    // Hand goes further back and up
+    handX = sx - side * (8 + 14 * t);
+    handY = sy - 2 - 8 * t;
+    weaponAngle = -facing * (0.5 + 1.2 * t); // weapon angles back
+  } else if (atk.phase === 'active') {
+    // Active — arm fully extended forward
+    const t = atk.t;
+    elbowX = sx + side * (12 + 4 * t);
+    elbowY = sy + 2;
+    handX = sx + side * (18 + 8 * t);
+    // Attack height: standing attacks go high, crouching attacks go low
+    if (p.attackStance === 'standing') {
+      handY = sy - 4 + 4 * t;
+    } else {
+      handY = sy + 14 + 6 * t;
+    }
+    weaponAngle = facing * (0.1 + 0.3 * t);
+  } else {
+    // Recovery — arm returning to idle
+    const t = atk.t;
+    elbowX = sx + side * (12 - 4 * t);
+    elbowY = sy + 2 + 10 * t;
+    handX = sx + side * (18 - 6 * t);
+    handY = sy + 6 + 12 * t;
+    weaponAngle = facing * (0.3 - 0.2 * t);
+  }
+
+  // Draw arm
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(elbowX, elbowY);
+  ctx.lineTo(handX, handY);
+  ctx.stroke();
+
+  // Draw weapon in hand
+  drawWeaponInHand(ctx, p, atk, handX, handY, weaponAngle, facing);
+}
+
+// ─── Weapon Drawing ──────────────────────────────────────────
+
+function drawWeaponInHand(ctx, p, atk, hx, hy, angle, facing) {
+  // Determine which weapon to show
+  let weaponId = null;
+  if (atk) {
+    weaponId = p.activeWeapon;
+  } else {
+    // Show first weapon in idle
+    weaponId = p.weapons[0];
+  }
+  if (!weaponId) return;
+
+  const wDef = C.WEAPON_DEFS[weaponId];
+  if (!wDef) return;
+
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(angle);
+
+  if (wDef.id === 'sword') {
+    drawSwordWeapon(ctx, facing);
+  } else if (wDef.id === 'dagger') {
+    drawDaggerWeapon(ctx, facing);
+  } else if (wDef.id === 'spear') {
+    drawSpearWeapon(ctx, facing);
+  } else if (wDef.subtype === 'boomerang') {
+    drawBoomerangWeapon(ctx, facing);
+  } else if (wDef.subtype === 'knife') {
+    drawThrowingKnifeWeapon(ctx, facing);
+  }
+
+  ctx.restore();
+}
+
+function drawSwordWeapon(ctx, facing) {
+  const dir = facing;
+  // Blade
+  ctx.strokeStyle = COLORS.weaponSteel;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(dir * 20, -2);
+  ctx.stroke();
+
+  // Crossguard
+  ctx.strokeStyle = COLORS.weaponHandle;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(dir * 2, -4);
+  ctx.lineTo(dir * 2, 4);
+  ctx.stroke();
+
+  // Handle nub
+  ctx.fillStyle = COLORS.weaponHandle;
+  ctx.fillRect(-dir * 2 - 1, -1.5, 3, 3);
+}
+
+function drawDaggerWeapon(ctx, facing) {
+  const dir = facing;
+  // Short blade
+  ctx.strokeStyle = COLORS.weaponSteel;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(dir * 10, -1);
+  ctx.stroke();
+
+  // Small guard
+  ctx.strokeStyle = COLORS.weaponHandle;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(dir * 1, -3);
+  ctx.lineTo(dir * 1, 3);
+  ctx.stroke();
+}
+
+function drawSpearWeapon(ctx, facing) {
+  const dir = facing;
+  // Long shaft
+  ctx.strokeStyle = COLORS.weaponSpear;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-dir * 4, 0);
+  ctx.lineTo(dir * 26, 0);
+  ctx.stroke();
+
+  // Spearhead (triangle)
+  ctx.fillStyle = COLORS.weaponSteel;
+  ctx.beginPath();
+  ctx.moveTo(dir * 26, 0);
+  ctx.lineTo(dir * 32, 0);
+  ctx.lineTo(dir * 26, -3);
+  ctx.moveTo(dir * 26, 0);
+  ctx.lineTo(dir * 32, 0);
+  ctx.lineTo(dir * 26, 3);
+  ctx.fill();
+}
+
+function drawBoomerangWeapon(ctx, facing) {
+  const dir = facing;
+  // V-shape boomerang
+  ctx.strokeStyle = COLORS.boomerang;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(dir * -4, -5);
+  ctx.lineTo(dir * 2, 0);
+  ctx.lineTo(dir * -4, 5);
+  ctx.stroke();
+}
+
+function drawThrowingKnifeWeapon(ctx, facing) {
+  const dir = facing;
+  // Small blade
+  ctx.fillStyle = COLORS.weaponSteel;
+  ctx.beginPath();
+  ctx.moveTo(dir * 8, 0);
+  ctx.lineTo(dir * 1, -2.5);
+  ctx.lineTo(dir * 1, 2.5);
+  ctx.closePath();
+  ctx.fill();
+
+  // Tiny handle
+  ctx.strokeStyle = COLORS.weaponHandle;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-dir * 4, 0);
+  ctx.stroke();
+}
+
+// ─── Melee Slash Effect ──────────────────────────────────────
+
+function drawMeleeSlashEffect(ctx, p, atk, body) {
+  const startX = p.x + (p.facing === 1 ? C.PLAYER_WIDTH : 0);
+  const endX = startX + p.facing * atk.wDef.range;
+
   const isHigh = p.attackStance === 'standing';
-  const slashY = isHigh ? bodyY + 10 : bodyY + bodyH - 10;
+  const slashY = isHigh ? body.shoulderY : body.hipY + 8;
 
   ctx.strokeStyle = COLORS.attackSlash;
   ctx.lineWidth = 3;
@@ -163,7 +494,6 @@ function drawMeleeSlash(ctx, p, wDef, bodyY, bodyH) {
   ctx.lineTo(endX, slashY);
   ctx.stroke();
 
-  // Wider slash effect
   ctx.lineWidth = 8;
   ctx.globalAlpha = 0.3;
   ctx.beginPath();
@@ -194,7 +524,6 @@ function drawKnife(ctx, proj) {
   ctx.save();
   ctx.translate(proj.x, proj.y);
 
-  // Small elongated triangle
   ctx.beginPath();
   ctx.moveTo(proj.direction * 10, 0);
   ctx.lineTo(-proj.direction * 3, -3);
@@ -209,16 +538,14 @@ function drawBoomerang(ctx, proj, frame) {
   ctx.save();
   ctx.translate(proj.x, proj.y);
 
-  // Rotate over time for spin effect
   const angle = frame * 0.3;
   ctx.rotate(angle);
 
-  // Diamond shape
   ctx.fillStyle = COLORS.boomerang;
   ctx.beginPath();
   ctx.moveTo(0, -6);
   ctx.lineTo(6, 0);
-  ctx.lineTo(0, 6);
+  ctx.moveTo(0, 6);
   ctx.lineTo(-6, 0);
   ctx.closePath();
   ctx.fill();
@@ -226,7 +553,6 @@ function drawBoomerang(ctx, proj, frame) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Underground/overhead indicator
   if (proj.height === 'none') {
     ctx.globalAlpha = 0.4;
     ctx.fillStyle = proj.y > C.GROUND_Y ? '#553300' : '#AADDFF';
@@ -251,44 +577,36 @@ function drawHUD(ctx, state) {
     const x = i === 0 ? padding : C.CANVAS_WIDTH - padding - barW;
     const y = 12;
 
-    // Label
     ctx.fillStyle = i === 0 ? COLORS.p1Light : COLORS.p2Light;
     ctx.font = 'bold 12px monospace';
     ctx.textAlign = i === 0 ? 'left' : 'right';
     ctx.fillText(`Player ${i + 1}`, i === 0 ? x : x + barW, y);
 
-    // HP bar background
     const barY = y + 6;
     ctx.fillStyle = COLORS.hpEmpty;
     ctx.fillRect(x, barY, barW, barH);
 
-    // HP bar fill
     const hpRatio = p.hp / C.MAX_HP;
     ctx.fillStyle = hpRatio > 0.4 ? COLORS.hpFull : '#CC4444';
     ctx.fillRect(x, barY, barW * hpRatio, barH);
 
-    // HP bar border
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.strokeRect(x, barY, barW, barH);
 
-    // HP text
     ctx.fillStyle = '#FFF';
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.fillText(`${p.hp}/${C.MAX_HP}`, x + barW / 2, barY + 12);
 
-    // Weapon indicators
     drawWeaponIndicators(ctx, p, i, x, barY + barH + 6);
   }
 
-  // Frame counter
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.font = '10px monospace';
   ctx.textAlign = 'center';
   ctx.fillText(`F:${state.frame}`, C.CANVAS_WIDTH / 2, 16);
 
-  // Victory overlay
   if (state.winner !== -1) {
     drawVictory(ctx, state.winner);
   }
