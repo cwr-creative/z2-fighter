@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Z2 Clone — Zelda 2 Fighting Game</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <!-- Title Screen -->
+    <div id="titleScreen" class="overlay">
+      <h1>Z2 CLONE</h1>
+      <p class="tagline">A Zelda 2 inspired fighting game</p>
+      <div class="menu-buttons">
+        <button id="localPlayBtn" class="btn btn-primary">Local Play</button>
+        <button id="onlinePlayBtn" class="btn btn-secondary">Online Play (WebRTC)</button>
+      </div>
+      <div class="instructions">
+        <p><strong>How it works:</strong> Choose 3 weapons, set your keys, fight!</p>
+        <p>Stand to block high, crouch to block low. Shields only protect your front.</p>
+        <p>Attack high to hit crouchers, attack low to hit standers.</p>
+      </div>
+    </div>
+
+    <!-- Online Setup -->
+    <div id="onlineSetup" class="overlay hidden"></div>
+
+    <!-- Weapon Select -->
+    <div id="weaponSelect" class="overlay hidden"></div>
+
+    <!-- Keybind Config -->
+    <div id="keybindScreen" class="overlay hidden"></div>
+
+    <!-- Victory -->
+    <div id="victoryScreen" class="overlay hidden"></div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
