@@ -24,6 +24,11 @@ export const HITSTOP_BLOCK = 4;
 export const HEAD_Y = GROUND_Y - PLAYER_STAND_HEIGHT + 10;   // ~266
 export const ANKLE_Y = GROUND_Y - 12;                         // ~308
 
+// === Rollback Netcode ===
+export const ROLLBACK_INPUT_DELAY = 2;       // frames of local input delay
+export const ROLLBACK_MAX_FRAMES = 8;        // max rollback depth
+export const ROLLBACK_INPUT_REDUNDANCY = 4;  // past inputs sent per message
+
 // === Boomerang ===
 export const BOOMERANG_RANGE = 400;
 export const BOOMERANG_MAX = 10;

@@ -3,9 +3,8 @@
  * Uses manual offer/answer exchange (copy-paste) for signaling.
  * Data channel transports serialized input frames.
  *
- * NOTE: Actual rollback netcode is NOT implemented here — this module
- * provides the transport layer. A future GGPO-style layer would sit
- * between this and the game loop.
+ * This module provides the transport layer. The GGPO-style rollback
+ * layer in rollback.js sits between this and the game loop.
  */
 
 export class NetworkManager {
@@ -60,7 +59,12 @@ export class NetworkManager {
     this._createPeerConnection();
     this.isHost = true;
 
-    const dc = this.pc.createDataChannel('game', { ordered: true });
+    // Unordered + unreliable for lowest latency; packet loss is
+    // compensated by redundant inputs in the rollback layer.
+    const dc = this.pc.createDataChannel('game', {
+      ordered: false,
+      maxRetransmits: 0,
+    });
     this._setupDataChannel(dc);
 
     const offer = await this.pc.createOffer();

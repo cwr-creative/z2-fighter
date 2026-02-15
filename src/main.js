@@ -2,12 +2,13 @@
  * Entry point — wires together all modules and runs the game loop.
  */
 import * as C from './constants.js';
-import { createGameState, createEmptyInput } from './state.js';
+import { createGameState } from './state.js';
 import { simulateFrame } from './simulation.js';
 import { InputManager } from './input.js';
 import { render } from './renderer.js';
 import { NetworkManager } from './network.js';
 import { UIManager } from './ui.js';
+import { RollbackManager } from './rollback.js';
 
 // ─── Globals ─────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ const ctx = canvas.getContext('2d');
 const inputManager = new InputManager();
 const networkManager = new NetworkManager();
 const ui = new UIManager();
+const rollbackManager = new RollbackManager();
 
 let gameState = null;
 let isOnline = false;
@@ -38,7 +40,6 @@ let localWeapons = null;   // this player's weapon picks
 let remoteWeapons = null;  // peer's weapon picks
 let localReady = false;    // local player clicked "Ready!"
 let remoteReady = false;   // peer signaled ready to fight
-const remoteInputBuffer = {};  // frame → input object
 
 /** Handle all incoming messages from the remote peer. */
 function handleRemoteMessage(msg) {
@@ -56,7 +57,8 @@ function handleRemoteMessage(msg) {
       break;
 
     case 'input':
-      remoteInputBuffer[msg.frame] = msg.input;
+      // Route to rollback manager for redundant-input handling
+      rollbackManager.receiveInputs(msg);
       break;
 
     case 'rematch':
@@ -178,8 +180,10 @@ function startCombat(p1Weapons, p2Weapons) {
   gameState = createGameState(p1Weapons, p2Weapons);
   inputManager.autoAssignGamepads();
 
-  // Clear stale remote inputs
-  for (const key in remoteInputBuffer) delete remoteInputBuffer[key];
+  // Initialize rollback manager for online play
+  if (isOnline) {
+    rollbackManager.reset(gameState);
+  }
 
   running = true;
   showingGame = true;
@@ -223,6 +227,18 @@ function gameLoop(timestamp) {
 
       if (gameState.winner !== -1) {
         running = false;
+        // Send extra inputs so peer can finish
+        if (isOnline) {
+          const lastInput = inputManager.getInput(0);
+          const sendFrame = rollbackManager.currentFrame + C.ROLLBACK_INPUT_DELAY;
+          for (let f = 0; f < 10; f++) {
+            networkManager.sendMessage({
+              type: 'input',
+              startFrame: sendFrame + f,
+              inputs: [lastInput],
+            });
+          }
+        }
         setTimeout(() => {
           ui.showVictory(gameState.winner, handlePostGame);
         }, 1500);
@@ -233,7 +249,7 @@ function gameLoop(timestamp) {
 
   // Keep rendering the game state (including victory overlay) even after running stops
   if (showingGame && gameState) {
-    render(ctx, gameState);
+    render(ctx, gameState, isOnline ? rollbackManager : null);
   }
 }
 
@@ -245,54 +261,24 @@ function tickLocal() {
 }
 
 /**
- * Online play: lockstep — send local input, wait for remote input,
- * simulate with both. Returns false if stalled (remote not ready).
+ * Online play: rollback netcode — predict remote input if missing,
+ * rollback and resimulate on misprediction. Never stalls.
  */
 function tickOnline() {
-  const currentFrame = gameState.frame;
-
-  // Always read from slot 0 (online player only binds slot 0)
   const localInput = inputManager.getInput(0);
 
-  // Send local input for this frame (and a few frames ahead so the
-  // peer can finish even if we stop ticking after detecting a winner)
-  networkManager.sendMessage({
-    type: 'input',
-    frame: currentFrame,
-    input: localInput,
-  });
+  const result = rollbackManager.tick(
+    gameState,
+    localInput,
+    isHost,
+    (msg) => networkManager.sendMessage(msg)
+  );
 
-  // Check if we have the remote player's input for this frame
-  const remoteInput = remoteInputBuffer[currentFrame];
-  if (!remoteInput) {
-    return false; // stall — wait for remote
+  if (result === null) {
+    return false; // still in input-delay startup
   }
 
-  // Consume the buffered input
-  delete remoteInputBuffer[currentFrame];
-
-  // Clean up old buffered frames
-  for (const key in remoteInputBuffer) {
-    if (parseInt(key) < currentFrame) delete remoteInputBuffer[key];
-  }
-
-  // Host is P1, guest is P2
-  const p1Input = isHost ? localInput : remoteInput;
-  const p2Input = isHost ? remoteInput : localInput;
-  gameState = simulateFrame(gameState, p1Input, p2Input);
-
-  // After simulating a winning frame, send the input again for a few
-  // extra frames so the peer won't stall if they're slightly behind
-  if (gameState.winner !== -1) {
-    for (let f = 1; f <= 5; f++) {
-      networkManager.sendMessage({
-        type: 'input',
-        frame: currentFrame + f,
-        input: localInput,
-      });
-    }
-  }
-
+  gameState = result;
   return true;
 }
 

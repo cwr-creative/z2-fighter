@@ -29,13 +29,17 @@ const COLORS = {
   weaponSpear: '#D2B48C',
 };
 
-export function render(ctx, state) {
+export function render(ctx, state, rollback) {
   ctx.clearRect(0, 0, C.CANVAS_WIDTH, C.CANVAS_HEIGHT);
 
   drawArena(ctx);
   drawProjectiles(ctx, state);
   drawPlayers(ctx, state);
   drawHUD(ctx, state);
+
+  if (rollback) {
+    drawNetStats(ctx, rollback);
+  }
 }
 
 // ─── Arena ───────────────────────────────────────────────────
@@ -633,6 +637,16 @@ function drawWeaponIndicators(ctx, p, idx, startX, y) {
     }
     ctx.fillText(label, x, y + 10);
   }
+}
+
+function drawNetStats(ctx, rb) {
+  const pred = rb.predictionDepth;
+  const color = pred > 4 ? '#FF4444' : pred > 2 ? '#FFCC00' : 'rgba(255,255,255,0.4)';
+
+  ctx.fillStyle = color;
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(`Pred:${pred} Rb:${rb.stats.rollbacks}`, C.CANVAS_WIDTH - 10, C.CANVAS_HEIGHT - 8);
 }
 
 function drawVictory(ctx, winner) {
