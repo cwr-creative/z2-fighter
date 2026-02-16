@@ -22,7 +22,20 @@ export class NetworkManager {
 
   _createPeerConnection() {
     const config = {
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+      ],
     };
     this.pc = new RTCPeerConnection(config);
 
@@ -59,12 +72,7 @@ export class NetworkManager {
     this._createPeerConnection();
     this.isHost = true;
 
-    // Unordered + unreliable for lowest latency; packet loss is
-    // compensated by redundant inputs in the rollback layer.
-    const dc = this.pc.createDataChannel('game', {
-      ordered: false,
-      maxRetransmits: 0,
-    });
+    const dc = this.pc.createDataChannel('game', { ordered: true });
     this._setupDataChannel(dc);
 
     const offer = await this.pc.createOffer();
